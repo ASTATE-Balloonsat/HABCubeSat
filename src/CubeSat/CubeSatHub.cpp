@@ -9,4 +9,3 @@
         send data, including its own, to the ground-station transmission medium.
 ******************************************************************************/
 
-#include <CubeSat.h>

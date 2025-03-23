@@ -11,7 +11,8 @@
     Methods:
         initializeCubeSat:
             Creates a new CubeSat module object using data stored
-            on the SD card. 
+            on the SD card.
+    Helper Functions:
         initializeSDCard:
             Ensures SD card is connected and prepares it for read/write
         loadConfig:
@@ -19,30 +20,54 @@
         errorBlink:
             Causes the primary LED to blink, indicating an unrecoverable
             error.
+        buildDevice:
+            Builds an individual device based on configurations.
+        generateDeviceVector:
+            Generates a vector of devices created by buildDevice.
 ******************************************************************************/
 
-#include <CubeSat.h>
 #include <SD.h>
+#include <memory>
+#include <cstring>
+#include <ArduinoJson.h>
+#include "CubeSatDevice.h"
+#include "CubeSatModule.h"
+#include "CubeSatInitializer.h"
+#include "CubeSatHub.h"
+#include "./Devices/Temperature/CubeSatMS8607.h"
 
-String CONFIG_FILE="./CubeSatConfig.json";
+// Constants
+std::string CONFIG_FILE="/CubeSatConfig.json";
+
+// Prototypes
+void errorBlink();
+JsonDocument loadConfig();
+bool initializeSdCard();
+CubeSatDevice* buildDevice(const char* deviceType, int deviceId);
+std::vector<CubeSatDevice*> generateDeviceVector(JsonArray deviceConfigurations);
 
 // Constructor
-CubeSatInitializer::CubeSatInitializer(){};
+CubeSatInitializer::CubeSatInitializer(){}
 
 // Instantiates a new CubeSat Module using data from the SD card
-CubeSatModule* initializeCubeSat()
+CubeSatModule* CubeSatInitializer::initializeCubeSat()
 {
-    initializeSdCard();
-    const JsonDocument config = loadConfig();
+    bool sdIsInit = initializeSdCard();
+    JsonDocument config = loadConfig();
+
     const int cubeSatModuleId = static_cast<int>(config["id"]);
+
     const bool isHub = config["isHub"];
-    
+
+    JsonArray deviceConfigurations = config["devices"];
+
+    std::vector<CubeSatDevice*> devices = generateDeviceVector(deviceConfigurations);
     if (!isHub)
     {
-        return new CubeSatModule(false, cubeSatModuleId);
+        return new CubeSatModule(false, cubeSatModuleId, devices);
     }
 
-    return new CubeSatHub(cubeSatModuleId);
+    return new CubeSatHub(cubeSatModuleId, devices);
 };
 
 // Ensures SD card is connected and ready for read/write
@@ -55,28 +80,29 @@ bool initializeSdCard()
         // and there's no SD card to write errors to.
         errorBlink();
     }
+    return true;
 }
 
 // Loads configuration file from the SD card
 JsonDocument loadConfig()
 {
     // Load the file into a file handler
-    File file = SD.open(CONFIG_FILE);
+    File file = SD.open(CONFIG_FILE.c_str());
     
     // Blink continuously.
     // The module can't proceed without being initialized 
     // and there's no SD card to write errors to.
     if (!file) 
     {
-      errorBlink();
+        errorBlink();
     }
-  
+
     // Read the file content into a String
     String fileContent = file.readString();
 
     // Close the file
     file.close();
-  
+
     // Create a JSON document
     JsonDocument doc;
   
@@ -86,7 +112,7 @@ JsonDocument loadConfig()
     // Check for errors in deserialization
     if (error) 
     {
-      errorBlink();
+        errorBlink();
     }
 
     return doc;
@@ -101,7 +127,26 @@ void errorBlink()
         digitalWrite(LED_BUILTIN, HIGH);
         delay(1000);
         digitalWrite(LED_BUILTIN, LOW);
-        delay(1000);      
+        delay(1000);
     }
 };
 
+CubeSatDevice* buildDevice(const char* deviceType, int deviceId)
+{
+    if (std::strcmp(deviceType, "MS8607") == 0)
+    {
+        return new CubeSatMS8607(deviceId);
+    }
+    return nullptr;
+}
+
+std::vector<CubeSatDevice*> generateDeviceVector(JsonArray deviceConfigurations)
+{   
+    std::vector<CubeSatDevice*> devices;  // Vector should hold pointers to CubeSatDevice
+    for (JsonObject deviceConfiguration : deviceConfigurations) 
+    {
+        devices.push_back(buildDevice(deviceConfiguration["deviceType"], deviceConfiguration["id"]));
+    }
+
+    return devices;
+}
